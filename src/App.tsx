@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence, useMotionValue, useTransform, useSpring } from 'motion/react';
 import { platforms, roms, contributors, Platform, Rom, Contributor } from './data';
 import { Battery, Wifi, Bell, Search, Info, Settings, Download, X, Users, Check } from 'lucide-react';
 
@@ -15,14 +15,49 @@ export default function App() {
   const [error, setError] = useState(false);
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
-  // Hardcoded private code for the demo
-  const CORRECT_CODE = '1234';
+  const x = useMotionValue(0);
+  const y = useMotionValue(0);
+  const mouseXSpring = useSpring(x, { stiffness: 300, damping: 20 });
+  const mouseYSpring = useSpring(y, { stiffness: 300, damping: 20 });
+  const rotateX = useTransform(mouseYSpring, [-0.5, 0.5], ["17.5deg", "-17.5deg"]);
+  const rotateY = useTransform(mouseXSpring, [-0.5, 0.5], ["-17.5deg", "17.5deg"]);
 
-  const handleLogin = (code: string) => {
-    if (code === CORRECT_CODE) {
-      setIsAuthenticated(true);
-      setError(false);
-    } else {
+  const handleMouseMove = (e: React.MouseEvent<HTMLImageElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const width = rect.width;
+    const height = rect.height;
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+    const xPct = mouseX / width - 0.5;
+    const yPct = mouseY / height - 0.5;
+    x.set(xPct);
+    y.set(yPct);
+  };
+
+  const handleMouseLeave = () => {
+    x.set(0);
+    y.set(0);
+  };
+
+  const handleLogin = async (code: string) => {
+    try {
+      const response = await fetch('/api/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code })
+      });
+      
+      if (response.ok) {
+        setIsAuthenticated(true);
+        setError(false);
+      } else {
+        setError(true);
+        setPasscode(['', '', '', '']);
+        if (inputRefs.current[0]) inputRefs.current[0].focus();
+        setTimeout(() => setError(false), 2000);
+      }
+    } catch (err) {
+      console.error("Verification failed:", err);
       setError(true);
       setPasscode(['', '', '', '']);
       if (inputRefs.current[0]) inputRefs.current[0].focus();
@@ -83,47 +118,55 @@ export default function App() {
         >
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-white/80 backdrop-blur-xl p-10 rounded-[3rem] shadow-[0_20px_60px_-15px_rgba(0,0,0,0.1)] border-4 border-white w-full max-w-md text-center"
+            animate={{ opacity: 1, y: 0, x: error ? [-10, 10, -10, 10, -5, 5, 0] : 0 }}
+            transition={error ? { duration: 0.4 } : {}}
+            className="bg-white/80 backdrop-blur-xl p-10 rounded-[3rem] shadow-[0_20px_60px_-15px_rgba(0,0,0,0.1)] border-4 border-white w-full max-w-md text-center relative z-10"
+            style={{ perspective: 1000 }}
           >
-            <img 
+            <motion.img 
                src="https://i.imgur.com/MBWnmPo.png" 
                alt="logo"
-               className="mb-12 w-48 mx-auto object-contain"
+               style={{ rotateX, rotateY, transformStyle: "preserve-3d" }}
+               onMouseMove={handleMouseMove}
+               onMouseLeave={handleMouseLeave}
+               className="mb-12 w-48 mx-auto object-contain drop-shadow-xl"
              />
             
             <form onSubmit={(e) => e.preventDefault()}>
               <div className="flex gap-4 justify-center">
                 {[0, 1, 2, 3].map((index) => (
-                  <input
-                    key={index}
-                    ref={(el) => (inputRefs.current[index] = el)}
-                    type="password"
-                    inputMode="numeric"
-                    maxLength={1}
-                    value={passcode[index]}
-                    onChange={(e) => handleChange(index, e.target.value)}
-                    onKeyDown={(e) => handleKeyDown(index, e)}
-                    onPaste={handlePaste}
-                    className={`w-16 h-20 text-center text-3xl font-bold rounded-2xl bg-slate-100 border-4 outline-none transition-all ${
-                      error ? 'border-red-400 text-red-500' : 'border-transparent focus:border-blue-400 focus:bg-white'
-                    }`}
-                  />
+                  <div key={index} className="relative w-16 h-20">
+                    <input
+                      ref={(el) => (inputRefs.current[index] = el)}
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={1}
+                      value={passcode[index]}
+                      onChange={(e) => handleChange(index, e.target.value)}
+                      onKeyDown={(e) => handleKeyDown(index, e)}
+                      onPaste={handlePaste}
+                      className={`absolute inset-0 w-full h-full text-center text-3xl font-bold rounded-2xl bg-slate-100 border-4 outline-none transition-all text-transparent caret-blue-500 ${
+                        error ? 'border-red-400 text-red-500' : 'border-transparent focus:border-blue-400 focus:bg-white'
+                      }`}
+                    />
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <AnimatePresence>
+                        {passcode[index] && (
+                          <motion.span
+                            initial={{ scale: 0.5, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            exit={{ scale: 0.5, opacity: 0 }}
+                            transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                            className={`text-3xl font-bold ${error ? 'text-red-500' : 'text-slate-800'}`}
+                          >
+                            {passcode[index]}
+                          </motion.span>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  </div>
                 ))}
               </div>
-              
-              <AnimatePresence>
-                {error && (
-                  <motion.p 
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0 }}
-                    className="text-red-500 font-bold mt-6"
-                  >
-                    Incorrect Code
-                  </motion.p>
-                )}
-              </AnimatePresence>
             </form>
           </motion.div>
         </motion.div>
@@ -148,7 +191,15 @@ function MainApp() {
   const [activeSidebar, setActiveSidebar] = useState<'platforms' | 'contributors' | null>(null);
   const [platformSearch, setPlatformSearch] = useState('');
   const [romSearch, setRomSearch] = useState('');
-  const [currentPage, setCurrentPage] = useState(0);
+  const [{ page: currentPage, direction }, setPageState] = useState({ page: 0, direction: 0 });
+
+  const setCurrentPage = (newPageOrUpdater: number | ((prev: number) => number)) => {
+    setPageState(prev => {
+      const newPage = typeof newPageOrUpdater === 'function' ? newPageOrUpdater(prev.page) : newPageOrUpdater;
+      const newDirection = newPage > prev.page ? 1 : newPage < prev.page ? -1 : 0;
+      return { page: newPage, direction: newDirection };
+    });
+  };
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 60000);
@@ -274,7 +325,17 @@ function MainApp() {
                         return (
                         <button
                           key={p.id}
-                          onClick={() => { if (!isEmpty) { setSelectedPlatform(p); setActiveSidebar(null); setCurrentPage(0); } }}
+                          onClick={() => { 
+                            if (!isEmpty) { 
+                              if (selectedPlatform?.id === p.id) {
+                                setSelectedPlatform(null);
+                              } else {
+                                setSelectedPlatform(p); 
+                              }
+                              setActiveSidebar(null); 
+                              setCurrentPage(0); 
+                            } 
+                          }}
                           className={`w-full p-3 rounded-[1.25rem] border-4 transition-all flex flex-col items-center gap-2 group ${isEmpty ? 'border-transparent bg-slate-100 opacity-60 grayscale cursor-not-allowed' : selectedPlatform?.id === p.id ? 'border-blue-400 bg-blue-50 shadow-md scale-105' : 'border-white bg-slate-50 hover:bg-slate-100 hover:scale-105'}`}
                         >
                           <div className="w-full h-16 rounded-xl overflow-hidden shadow-inner bg-slate-200 relative">
@@ -400,36 +461,59 @@ function MainApp() {
         {/* Main Content Area */}
         <main className="flex-1 flex flex-col items-center pointer-events-auto w-full">
           <div 
-            className="w-full bg-white/60 backdrop-blur-md border-4 border-white rounded-[3rem] p-8 shadow-lg transition-all duration-500"
+            className="w-full bg-white/60 backdrop-blur-md border-4 border-white rounded-[3rem] p-8 shadow-lg transition-all duration-500 overflow-hidden"
           >
-             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6 grid-flow-dense">
-                <AnimatePresence mode="popLayout">
-                  {paginatedRoms.length > 0 ? (
-                    paginatedRoms.map(rom => (
-                      <motion.div
-                        layout
-                        initial={{ opacity: 0, scale: 0.8 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, scale: 0.8 }}
-                        transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-                        key={rom.id}
-                        className={spanClasses[rom.gridSize] || 'col-span-1 row-span-1'}
-                      >
-                        <RomCard rom={rom} />
-                      </motion.div>
-                    ))
-                  ) : (
-                    <motion.div 
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="col-span-full py-12 flex flex-col items-center justify-center text-slate-400"
-                    >
-                      <Search size={48} className="mb-4 opacity-50" />
-                      <h3 className="text-xl font-black">No ROMs found</h3>
-                      <p className="font-semibold mt-2">Try adjusting your search or selecting a different platform.</p>
-                    </motion.div>
-                  )}
+             <div className="relative w-full">
+                <AnimatePresence mode="popLayout" initial={false} custom={direction}>
+                  <motion.div
+                    key={currentPage}
+                    custom={direction}
+                    variants={{
+                      enter: (dir: number) => ({
+                        x: dir > 0 ? '100%' : '-100%',
+                        opacity: 0,
+                        scale: 0.9,
+                      }),
+                      center: {
+                        zIndex: 1,
+                        x: 0,
+                        opacity: 1,
+                        scale: 1,
+                      },
+                      exit: (dir: number) => ({
+                        zIndex: 0,
+                        x: dir < 0 ? '100%' : '-100%',
+                        opacity: 0,
+                        scale: 0.9,
+                      })
+                    }}
+                    initial="enter"
+                    animate="center"
+                    exit="exit"
+                    transition={{
+                      x: { type: "spring", stiffness: 300, damping: 30 },
+                      opacity: { duration: 0.2 },
+                      scale: { duration: 0.3 }
+                    }}
+                    className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6 grid-flow-dense w-full"
+                  >
+                    {paginatedRoms.length > 0 ? (
+                      paginatedRoms.map(rom => (
+                        <div
+                          key={rom.id}
+                          className={spanClasses[rom.gridSize] || 'col-span-1 row-span-1'}
+                        >
+                          <RomCard rom={rom} />
+                        </div>
+                      ))
+                    ) : (
+                      <div className="col-span-full py-12 flex flex-col items-center justify-center text-slate-400 w-full h-full">
+                        <Search size={48} className="mb-4 opacity-50" />
+                        <h3 className="text-xl font-black">No ROMs found</h3>
+                        <p className="font-semibold mt-2">Try adjusting your search or selecting a different platform.</p>
+                      </div>
+                    )}
+                  </motion.div>
                 </AnimatePresence>
              </div>
           </div>
@@ -558,15 +642,8 @@ function DownloadModal({ rom, onClose }: { rom: Rom; onClose: () => void }) {
         transition={{ type: "spring", damping: 25, stiffness: 300 }}
         className="relative bg-white rounded-[2.5rem] p-8 shadow-2xl border-4 border-white w-full max-w-lg z-10"
       >
-        <button 
-          onClick={onClose}
-          className="absolute top-6 right-6 p-2 bg-slate-100 hover:bg-slate-200 rounded-full text-slate-500 transition-colors"
-        >
-          <X size={24} />
-        </button>
-
         <div className="relative w-full h-40 rounded-2xl overflow-hidden mb-6 flex items-end p-6 border-4 border-slate-50 shadow-inner">
-           <img src={rom.coverImage} alt={rom.title} className="absolute inset-0 w-full h-full object-cover" />
+           <img src={rom.bannerImage || rom.coverImage} alt={rom.title} className="absolute inset-0 w-full h-full object-cover" />
            <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
            <h2 className="relative z-10 text-2xl font-black text-white drop-shadow-md">{rom.title}</h2>
         </div>
